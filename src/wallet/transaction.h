@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Bitcoin Core developers
+// Copyright (c) 2021-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -293,9 +293,11 @@ public:
 
     bool isAbandoned() const { return state<TxStateInactive>() && state<TxStateInactive>()->abandoned; }
     bool isConflicted() const { return state<TxStateConflicted>(); }
+    bool isInactive() const { return state<TxStateInactive>(); }
     bool isUnconfirmed() const { return !isAbandoned() && !isConflicted() && !isConfirmed(); }
     bool isConfirmed() const { return state<TxStateConfirmed>(); }
     const uint256& GetHash() const { return tx->GetHash(); }
+    const uint256& GetWitnessHash() const { return tx->GetWitnessHash(); }
     bool IsCoinBase() const { return tx->IsCoinBase(); }
 
     // Disable copying of CWalletTx objects to prevent bugs where instances get
@@ -303,6 +305,13 @@ public:
     // wrong copy.
     CWalletTx(CWalletTx const &) = delete;
     void operator=(CWalletTx const &x) = delete;
+};
+
+struct WalletTxOrderComparator {
+    bool operator()(const CWalletTx* a, const CWalletTx* b) const
+    {
+        return a->nOrderPos < b->nOrderPos;
+    }
 };
 } // namespace wallet
 

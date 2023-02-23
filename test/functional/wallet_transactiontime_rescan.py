@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2018-2021 The Bitcoin Core developers
+# Copyright (c) 2018-2022 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test transaction time during old block rescanning
@@ -11,14 +11,25 @@ from test_framework.blocktools import COINBASE_MATURITY
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_equal,
+    assert_raises_rpc_error,
     set_node_times,
+)
+from test_framework.wallet_util import (
+    get_generate_key,
 )
 
 
 class TransactionTimeRescanTest(BitcoinTestFramework):
+    def add_options(self, parser):
+        self.add_wallet_options(parser)
+
     def set_test_params(self):
         self.setup_clean_chain = False
         self.num_nodes = 3
+        self.extra_args = [["-keypool=400"],
+                           ["-keypool=400"],
+                           []
+                          ]
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
@@ -157,6 +168,44 @@ class TransactionTimeRescanTest(BitcoinTestFramework):
                 assert_equal(tx['blocktime'], cur_time + ten_days + ten_days + ten_days)
                 assert_equal(tx['time'], cur_time + ten_days + ten_days + ten_days)
 
+
+        self.log.info('Test handling of invalid parameters for rescanblockchain')
+        assert_raises_rpc_error(-8, "Invalid start_height", restorewo_wallet.rescanblockchain, -1, 10)
+        assert_raises_rpc_error(-8, "Invalid stop_height", restorewo_wallet.rescanblockchain, 1, -1)
+        assert_raises_rpc_error(-8, "stop_height must be greater than start_height", restorewo_wallet.rescanblockchain, 20, 10)
+
+        self.log.info("Test `rescanblockchain` fails when wallet is encrypted and locked")
+        usernode.createwallet(wallet_name="enc_wallet", passphrase="passphrase")
+        enc_wallet = usernode.get_wallet_rpc("enc_wallet")
+        assert_raises_rpc_error(-13, "Error: Please enter the wallet passphrase with walletpassphrase first.", enc_wallet.rescanblockchain)
+
+        if not self.options.descriptors:
+            self.log.info("Test rescanning an encrypted wallet")
+            hd_seed = get_generate_key().privkey
+
+            usernode.createwallet(wallet_name="temp_wallet", blank=True, descriptors=False)
+            temp_wallet = usernode.get_wallet_rpc("temp_wallet")
+            temp_wallet.sethdseed(seed=hd_seed)
+
+            for i in range(399):
+                temp_wallet.getnewaddress()
+
+            self.generatetoaddress(usernode, COINBASE_MATURITY + 1, temp_wallet.getnewaddress())
+            self.generatetoaddress(usernode, COINBASE_MATURITY + 1, temp_wallet.getnewaddress())
+
+            minernode.createwallet("encrypted_wallet", blank=True, passphrase="passphrase", descriptors=False)
+            encrypted_wallet = minernode.get_wallet_rpc("encrypted_wallet")
+
+            encrypted_wallet.walletpassphrase("passphrase", 1)
+            encrypted_wallet.sethdseed(seed=hd_seed)
+
+            batch = []
+            batch.append(encrypted_wallet.walletpassphrase.get_request("passphrase", 3))
+            batch.append(encrypted_wallet.rescanblockchain.get_request())
+
+            encrypted_wallet.batch(batch)
+
+            assert_equal(encrypted_wallet.getbalance(), temp_wallet.getbalance())
 
 if __name__ == '__main__':
     TransactionTimeRescanTest().main()
